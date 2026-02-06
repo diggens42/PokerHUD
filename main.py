@@ -6,8 +6,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtWidgets import QApplication, QInputDialog
-from PyQt6.QtWidgets import QDialog
+from PyQt6.QtWidgets import QApplication, QInputDialog, QDialog
 
 from pokerlens.core.ocr_engine import OCREngine
 from pokerlens.core.screen_capture import ScreenCapture
@@ -18,12 +17,14 @@ from pokerlens.overlay.position_tracker import PositionTracker
 from pokerlens.overlay.stat_widget import StatWidget
 from pokerlens.overlay.system_tray import SystemTray
 from pokerlens.overlay.settings import Settings, SettingsDialog
+from pokerlens.overlay.welcome_dialog import WelcomeDialog
 from pokerlens.parser.table_state import TableStateParser
 from pokerlens.parser.hand_tracker import HandTracker
 from pokerlens.storage.database import Database
 from pokerlens.storage.session import SessionManager
 from pokerlens.stats.calculator import StatsCalculator
 from pokerlens.utils.logger import get_logger
+from pokerlens.utils.error_handler import ErrorHandler
 import config
 
 
@@ -37,9 +38,24 @@ class PokerHUDApp:
         self.settings = Settings()
         self.settings.apply_to_config()
         
+        # Initialize error handler and validate prerequisites
+        self.error_handler = ErrorHandler(self.logger)
+        
+        # Check Tesseract availability
+        tesseract_path = self.settings.get("tesseract_path", config.DEFAULT_TESSERACT_PATH)
+        tesseract_valid, tesseract_error = self.error_handler.check_tesseract(tesseract_path)
+        if not tesseract_valid:
+            self.logger.warning("Tesseract validation failed", error=tesseract_error)
+        
+        # Check database integrity
+        db_valid, db_error = self.error_handler.check_database(config.DB_PATH)
+        if not db_valid:
+            self.logger.warning("Database validation failed", error=db_error)
+        
+        # Initialize core components
         self.detector = TableDetector()
         self.capture = ScreenCapture()
-        self.ocr = OCREngine(self.settings.get("tesseract_path"))
+        self.ocr = OCREngine(tesseract_path)
         self.database = Database()
         self.session_manager = SessionManager(self.database)
         self.stats_calculator = StatsCalculator(self.database)
@@ -68,6 +84,7 @@ class PokerHUDApp:
         
         if not dialog.should_show_again():
             self.settings.set("show_welcome", False)
+            self.settings.save()
         
         if dialog.result() == QDialog.DialogCode.Accepted:
             if dialog.sender() == dialog.settings_button:
@@ -79,6 +96,26 @@ class PokerHUDApp:
         if dialog.exec():
             self.max_tables = self.settings.get("max_tables", 10)
             self.logger.info("Settings updated")
+
+    def _start_tracking(self):
+        """Start tracking tables."""
+        self.is_tracking = True
+        self.system_tray.show_message("PokerHUD", "Tracking started")
+        self.logger.info("Tracking started")
+
+    def _stop_tracking(self):
+        """Stop tracking tables."""
+        self.is_tracking = False
+        self.system_tray.show_message("PokerHUD", "Tracking stopped")
+        self.logger.info("Tracking stopped")
+
+    def _quit(self):
+        """Quit application."""
+        self._cleanup()
+        self.app.quit()
+
+    def run(self):
+        """Run main application loop."""
         self.system_tray.show_message("PokerHUD", "Application started. Click 'Start Tracking' to begin.")
 
         if config.DEBUG_SAVE_CAPTURES:
@@ -126,37 +163,6 @@ class PokerHUDApp:
                     self._update_table(table, capture_count)
 
                 self.system_tray.update_table_count(len(self.tracked_tables))
-                                if len(tables) > self.max_tables:
-                    self.logger.warning(
-                        "Too many tables detected",
-                        count=len(tables),
-                        max=self.max_tables
-                    )
-                    tables = tables[:self.max_tables]
-                
-                current_hwnds = {table.hwnd for table in tables}
-                previous_hwnds = set(self.tracked_tables.keys())
-
-                new_tables = current_hwnds - previous_hwnds
-        self.system_tray.show_message(
-            "New Table Detected",
-            f"Now tracking: {table.title[:50]}",
-            2000
-        )
-        
-                closed_tables = previous_hwnds - current_hwnds
-
-                for hwnd in new_tables:
-                    self._handle_new_table(tables, hwnd)
-
-                for hwnd in closed_tables:
-                    self._handle_closed_table(hwnd)
-
-                for table in tables:
-                    if not self.detector.is_table_active(table.hwnd):
-                        continue
-
-                    self._update_table(table, capture_count)
 
                 capture_count += 1
                 self.app.processEvents()
@@ -209,6 +215,12 @@ class PokerHUDApp:
         }
         self.hud_windows[hwnd] = hud_window
         
+        self.system_tray.show_message(
+            "New Table Detected",
+            f"Now tracking: {table.title[:50]}",
+            2000
+        )
+        
         self.logger.info("HUD created for table", hwnd=hwnd, active_tables=len(self.tracked_tables))
 
     def _handle_closed_table(self, hwnd: int):
@@ -244,8 +256,6 @@ class PokerHUDApp:
 
     def _add_player_note(self, player_name: str):
         """Add note for player."""
-        from PyQt6.QtWidgets import QInputDialog
-        
         player = self.database.get_player_by_username(player_name)
         if not player:
             return
@@ -287,6 +297,7 @@ class PokerHUDApp:
             snapshot = parser.parse_table(img, table.width, table.height)
             
             self.error_handler.reset_error_count(str(hwnd), "ocr")
+            self.error_handler.reset_error_count(str(hwnd), "capture")
             
             stat_displays = []
             seat_positions = position_tracker.calculate_seat_positions(

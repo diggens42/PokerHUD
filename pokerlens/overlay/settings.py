@@ -25,7 +25,7 @@ class Settings:
         Args:
             config_path: Path to config JSON file.
         """
-        self.config_path = config_path or (config.BASE_DIR.parent / "settings.json")
+        self.config_path = config_path or (config.DATA_DIR / "settings.json")
         self.settings: dict[str, Any] = self._load_defaults()
         self.load()
 
@@ -33,8 +33,6 @@ class Settings:
         """Load default settings."""
         return {
             "capture_interval_ms": config.CAPTURE_INTERVAL_MS,
-            "hud_opacity": 0.80,
-            "font_size": 10,
             "tesseract_path": config.DEFAULT_TESSERACT_PATH,
             "db_path": str(config.DB_PATH),
             "debug_mode": config.DEBUG_SAVE_CAPTURES,

@@ -14,6 +14,7 @@ TESSDATA_DIR = RESOURCES_DIR / "tessdata"
 TABLE_TEMPLATES_DIR = RESOURCES_DIR / "table_templates"
 DATA_DIR = BASE_DIR / "data"
 LOG_DIR = BASE_DIR / "logs"
+CONFIG_DIR = DATA_DIR  # Settings and configuration files
 
 CAPTURE_INTERVAL_MS = 500
 OCR_LANG = "eng"
