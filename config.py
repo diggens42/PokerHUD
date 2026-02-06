@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# Application metadata
 APP_NAME = "PokerHUD"
+APP_VERSION = "1.0.0"
 
+# Paths
 BASE_DIR = Path(__file__).resolve().parent
 RESOURCES_DIR = BASE_DIR / "resources"
 TESSDATA_DIR = RESOURCES_DIR / "tessdata"
