@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from PyQt6.QtGui import QColor
+
+if TYPE_CHECKING:
+    from pokerlens.storage.database import Database
 
 
 @dataclass
@@ -48,6 +51,7 @@ class StatWidget:
         af: float,
         three_bet: float,
         fold_to_cbet: float,
+        database: Optional[Database] = None,
     ) -> str:
         """
         Format stats for display.
@@ -60,15 +64,22 @@ class StatWidget:
             af: Aggression factor.
             three_bet: 3-bet percentage.
             fold_to_cbet: Fold to c-bet percentage.
+            database: Database instance for note indicator.
 
         Returns:
             Formatted stat string.
         """
+        note_indicator = ""
+        if database:
+            player = database.get_player_by_username(player_name)
+            if player and player.get("notes", "").strip():
+                note_indicator = " 📝"
+        
         if hands < 10:
-            return f"{player_name}\n({hands} hands)"
+            return f"{player_name}{note_indicator}\n({hands} hands)"
 
         return (
-            f"{player_name}\n"
+            f"{player_name}{note_indicator}\n"
             f"VPIP: {vpip:.0f}% | PFR: {pfr:.0f}%\n"
             f"AF: {af:.1f} | 3B: {three_bet:.0f}%\n"
             f"FCB: {fold_to_cbet:.0f}% | {hands}h"

@@ -288,6 +288,7 @@ class PokerHUDApp:
                             stats.af,
                             stats.three_bet_pct,
                             stats.fold_to_cbet_pct,
+                            self.database,
                         )
                         stat_displays.append((pos.x, pos.y, stat_text, seat_info.player_name))
             
