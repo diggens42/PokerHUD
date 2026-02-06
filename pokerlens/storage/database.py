@@ -231,3 +231,124 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM sessions WHERE ended_at IS NULL")
             return [dict(row) for row in cursor.fetchall()]
+
+    def create_hand(self, session_id: int, hand_number: int, board_cards: str, pot_size: float) -> int:
+        """
+        Create new hand record.
+
+        Args:
+            session_id: Session ID.
+            hand_number: Hand number.
+            board_cards: JSON string of board cards.
+            pot_size: Final pot size.
+
+        Returns:
+            Hand ID.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO hands (session_id, hand_number, board_cards, pot_size) VALUES (?, ?, ?, ?)",
+                (session_id, hand_number, board_cards, pot_size)
+            )
+            return cursor.lastrowid
+
+    def add_hand_action(
+        self,
+        hand_id: int,
+        player_id: int,
+        seat_number: int,
+        street: str,
+        action: str,
+        amount: float,
+        is_voluntary: bool,
+        sequence_order: int,
+    ) -> int:
+        """
+        Add action to hand.
+
+        Args:
+            hand_id: Hand ID.
+            player_id: Player ID.
+            seat_number: Seat number.
+            street: Street name.
+            action: Action type.
+            amount: Bet/raise amount.
+            is_voluntary: Whether action is voluntary.
+            sequence_order: Action sequence number.
+
+        Returns:
+            Action ID.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO hand_actions 
+                (hand_id, player_id, seat_number, street, action, amount, is_voluntary, sequence_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (hand_id, player_id, seat_number, street, action, amount, int(is_voluntary), sequence_order)
+            )
+            return cursor.lastrowid
+
+    def add_hand_actions_batch(self, actions: list[tuple]) -> None:
+        """
+        Add multiple actions efficiently.
+
+        Args:
+            actions: List of action tuples (hand_id, player_id, seat_number, street, action, amount, is_voluntary, sequence_order).
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.executemany(
+                """
+                INSERT INTO hand_actions 
+                (hand_id, player_id, seat_number, street, action, amount, is_voluntary, sequence_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                actions
+            )
+
+    def get_hand_actions(self, hand_id: int) -> list[dict]:
+        """
+        Get all actions for a hand.
+
+        Args:
+            hand_id: Hand ID.
+
+        Returns:
+            List of action dicts.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM hand_actions WHERE hand_id = ? ORDER BY sequence_order",
+                (hand_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_player_hands(self, player_id: int, limit: Optional[int] = None) -> list[dict]:
+        """
+        Get hands involving a player.
+
+        Args:
+            player_id: Player ID.
+            limit: Maximum number of hands to return.
+
+        Returns:
+            List of hand dicts.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT DISTINCT h.* FROM hands h
+                JOIN hand_actions ha ON h.id = ha.hand_id
+                WHERE ha.player_id = ?
+                ORDER BY h.timestamp DESC
+            """
+            if limit:
+                query += f" LIMIT {limit}"
+            
+            cursor.execute(query, (player_id,))
+            return [dict(row) for row in cursor.fetchall()]
