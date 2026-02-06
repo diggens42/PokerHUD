@@ -15,6 +15,7 @@ from pokerlens.core.table_regions import TableSize
 from pokerlens.overlay.hud_window import HUDWindow
 from pokerlens.overlay.position_tracker import PositionTracker
 from pokerlens.overlay.stat_widget import StatWidget
+from pokerlens.overlay.system_tray import SystemTray
 from pokerlens.parser.table_state import TableStateParser
 from pokerlens.parser.hand_tracker import HandTracker
 from pokerlens.storage.database import Database
@@ -42,10 +43,11 @@ class PokerHUDApp:
         
         self.app = QApplication(sys.argv)
         self.max_tables = 10
-
-    def run(self):
-        """Main application loop with multi-table support."""
-        self.logger.info("PokerHUD starting", interval=config.CAPTURE_INTERVAL_MS)
+        self.is_tracking = False
+        
+        self.system_tray = SystemTray()
+        self.system_tray.start_tracking.connect(self._start_tracking)
+        self.system_tray.show_message("PokerHUD", "Application started. Click 'Start Tracking' to begin.")
 
         if config.DEBUG_SAVE_CAPTURES:
             config.DEBUG_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
@@ -54,6 +56,11 @@ class PokerHUDApp:
 
         try:
             while True:
+                if not self.is_tracking:
+                    self.app.processEvents()
+                    time.sleep(0.1)
+                    continue
+
                 tables = self.detector.find_tables()
                 
                 if len(tables) > self.max_tables:
@@ -68,6 +75,39 @@ class PokerHUDApp:
                 previous_hwnds = set(self.tracked_tables.keys())
 
                 new_tables = current_hwnds - previous_hwnds
+                closed_tables = previous_hwnds - current_hwnds
+
+                for hwnd in new_tables:
+                    self._handle_new_table(tables, hwnd)
+
+                for hwnd in closed_tables:
+                    self._handle_closed_table(hwnd)
+
+                for table in tables:
+                    if not self.detector.is_table_active(table.hwnd):
+                        continue
+
+                    self._update_table(table, capture_count)
+
+                self.system_tray.update_table_count(len(self.tracked_tables))
+                                if len(tables) > self.max_tables:
+                    self.logger.warning(
+                        "Too many tables detected",
+                        count=len(tables),
+                        max=self.max_tables
+                    )
+                    tables = tables[:self.max_tables]
+                
+                current_hwnds = {table.hwnd for table in tables}
+                previous_hwnds = set(self.tracked_tables.keys())
+
+                new_tables = current_hwnds - previous_hwnds
+        self.system_tray.show_message(
+            "New Table Detected",
+            f"Now tracking: {table.title[:50]}",
+            2000
+        )
+        
                 closed_tables = previous_hwnds - current_hwnds
 
                 for hwnd in new_tables:
