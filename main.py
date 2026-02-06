@@ -1,84 +1,205 @@
 """Main application entry point."""
 from __future__ import annotations
 
+import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
+from PyQt6.QtWidgets import QApplication
+
+from pokerlens.core.ocr_engine import OCREngine
 from pokerlens.core.screen_capture import ScreenCapture
 from pokerlens.core.table_detector import TableDetector
+from pokerlens.core.table_regions import TableSize
+from pokerlens.overlay.hud_window import HUDWindow
+from pokerlens.overlay.position_tracker import PositionTracker
+from pokerlens.overlay.stat_widget import StatWidget
+from pokerlens.parser.table_state import TableStateParser
+from pokerlens.parser.hand_tracker import HandTracker
+from pokerlens.storage.database import Database
+from pokerlens.storage.session import SessionManager
+from pokerlens.stats.calculator import StatsCalculator
+from pokerlens.utils.logger import get_logger
 import config
 
 
-def main():
-    """Main application loop."""
-    print(f"{config.APP_NAME} starting...")
+class PokerHUDApp:
+    """Main application controller."""
 
-    detector = TableDetector()
-    capture = ScreenCapture()
+    def __init__(self):
+        """Initialize application."""
+        self.logger = get_logger()
+        self.detector = TableDetector()
+        self.capture = ScreenCapture()
+        self.ocr = OCREngine()
+        self.database = Database()
+        self.session_manager = SessionManager(self.database)
+        self.stats_calculator = StatsCalculator(self.database)
+        
+        self.tracked_tables: dict[int, dict] = {}
+        self.hud_windows: dict[int, HUDWindow] = {}
+        
+        self.app = QApplication(sys.argv)
 
-    if config.DEBUG_SAVE_CAPTURES:
-        config.DEBUG_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+    def run(self):
+        """Main application loop."""
+        self.logger.info("PokerHUD starting", interval=config.CAPTURE_INTERVAL_MS)
 
-    print(f"Monitoring for PokerStars tables...")
-    print(f"Capture interval: {config.CAPTURE_INTERVAL_MS}ms")
-    print(f"Debug mode: {config.DEBUG_SAVE_CAPTURES}")
+        if config.DEBUG_SAVE_CAPTURES:
+            config.DEBUG_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
 
-    capture_count = 0
-    tracked_tables = {}
+        capture_count = 0
 
-    try:
-        while True:
-            tables = detector.find_tables()
+        try:
+            while True:
+                tables = self.detector.find_tables()
+                
+                current_hwnds = {table.hwnd for table in tables}
+                previous_hwnds = set(self.tracked_tables.keys())
 
-            current_hwnds = {table.hwnd for table in tables}
-            previous_hwnds = set(tracked_tables.keys())
+                new_tables = current_hwnds - previous_hwnds
+                closed_tables = previous_hwnds - current_hwnds
 
-            new_tables = current_hwnds - previous_hwnds
-            closed_tables = previous_hwnds - current_hwnds
+                for hwnd in new_tables:
+                    self._handle_new_table(tables, hwnd)
 
-            for hwnd in new_tables:
-                table = next(t for t in tables if t.hwnd == hwnd)
-                print(f"[+] New table detected: {table.title}")
-                tracked_tables[hwnd] = table
+                for hwnd in closed_tables:
+                    self._handle_closed_table(hwnd)
 
-            for hwnd in closed_tables:
-                table = tracked_tables[hwnd]
-                print(f"[-] Table closed: {table.title}")
-                del tracked_tables[hwnd]
+                for table in tables:
+                    if not self.detector.is_table_active(table.hwnd):
+                        continue
 
-            for table in tables:
-                if not detector.is_table_active(table.hwnd):
+                    self._update_table(table, capture_count)
+
+                capture_count += 1
+                self.app.processEvents()
+                time.sleep(config.CAPTURE_INTERVAL_MS / 1000.0)
+
+        except KeyboardInterrupt:
+            self.logger.info("Shutting down")
+        finally:
+            self._cleanup()
+
+    def _handle_new_table(self, tables: list, hwnd: int):
+        """Handle new table detection."""
+        table = next(t for t in tables if t.hwnd == hwnd)
+        self.logger.info("New table detected", table=table.title)
+        
+        session_id = self.session_manager.start_session(
+            table.title,
+            stakes="Unknown",
+            table_size=6
+        )
+        
+        parser = TableStateParser(self.ocr, TableSize.SIX_MAX)
+        tracker = HandTracker()
+        position_tracker = PositionTracker(TableSize.SIX_MAX)
+        stat_widget = StatWidget()
+        
+        hud_window = HUDWindow(table.x, table.y, table.width, table.height)
+        hud_window.show()
+        
+        self.tracked_tables[hwnd] = {
+            "table": table,
+            "session_id": session_id,
+            "parser": parser,
+            "tracker": tracker,
+            "position_tracker": position_tracker,
+            "stat_widget": stat_widget,
+        }
+        self.hud_windows[hwnd] = hud_window
+
+    def _handle_closed_table(self, hwnd: int):
+        """Handle table closure."""
+        table_info = self.tracked_tables[hwnd]
+        self.logger.info("Table closed", table=table_info["table"].title)
+        
+        self.session_manager.end_session(table_info["table"].title)
+        
+        if hwnd in self.hud_windows:
+            self.hud_windows[hwnd].close()
+            del self.hud_windows[hwnd]
+        
+        del self.tracked_tables[hwnd]
+
+    def _update_table(self, table, capture_count: int):
+        """Update table state and HUD."""
+        hwnd = table.hwnd
+        
+        current_pos = self.detector.get_window_position(hwnd)
+        if current_pos:
+            x, y, width, height = current_pos
+            if (x, y, width, height) != table.region:
+                table = table._replace(x=x, y=y, width=width, height=height)
+                self.tracked_tables[hwnd]["table"] = table
+                
+                if hwnd in self.hud_windows:
+                    self.hud_windows[hwnd].update_position(x, y, width, height)
+
+        try:
+            img = self.capture.capture_region(*table.region)
+            
+            table_info = self.tracked_tables[hwnd]
+            parser = table_info["parser"]
+            position_tracker = table_info["position_tracker"]
+            stat_widget = table_info["stat_widget"]
+            
+            snapshot = parser.parse_table(img, table.width, table.height)
+            
+            stat_displays = []
+            seat_positions = position_tracker.calculate_seat_positions(
+                table.x, table.y, table.width, table.height
+            )
+            
+            for seat_num, seat_info in snapshot.seats.items():
+                if not seat_info.is_occupied:
                     continue
-
-                current_pos = detector.get_window_position(table.hwnd)
-                if current_pos:
-                    x, y, width, height = current_pos
-                    if (x, y, width, height) != table.region:
-                        tracked_tables[table.hwnd] = table._replace(
-                            x=x, y=y, width=width, height=height
+                
+                player = self.database.get_player_by_username(seat_info.player_name)
+                if player:
+                    stats = self.stats_calculator.calculate_player_stats(player["id"])
+                    if stats and stats.total_hands >= 10:
+                        pos = seat_positions[seat_num]
+                        stat_text = stat_widget.format_stats(
+                            stats.username,
+                            stats.total_hands,
+                            stats.vpip,
+                            stats.pfr,
+                            stats.af,
+                            stats.three_bet_pct,
+                            stats.fold_to_cbet_pct,
                         )
+                        stat_displays.append((pos.x, pos.y, stat_text))
+            
+            if hwnd in self.hud_windows:
+                self.hud_windows[hwnd].set_stats_display(stat_displays)
+            
+            if config.DEBUG_SAVE_CAPTURES and capture_count % 20 == 0:
+                timestamp = int(time.time())
+                filename = f"table_{hwnd}_{timestamp}.png"
+                filepath = config.DEBUG_CAPTURE_DIR / filename
+                self.capture.save_capture(img, filepath)
 
-                try:
-                    img = capture.capture_region(*table.region)
+        except Exception as e:
+            self.logger.error("Failed to update table", hwnd=hwnd, error=str(e))
 
-                    if config.DEBUG_SAVE_CAPTURES and capture_count % 10 == 0:
-                        timestamp = int(time.time())
-                        filename = f"table_{table.hwnd}_{timestamp}.png"
-                        filepath = config.DEBUG_CAPTURE_DIR / filename
-                        capture.save_capture(img, filepath)
-                        print(f"[DEBUG] Saved capture: {filename}")
+    def _cleanup(self):
+        """Cleanup resources."""
+        self.session_manager.end_all_sessions()
+        
+        for hud_window in self.hud_windows.values():
+            hud_window.close()
+        
+        self.capture.close()
+        self.logger.info("Cleanup complete")
 
-                except Exception as e:
-                    print(f"[ERROR] Failed to capture table {table.hwnd}: {e}")
 
-            capture_count += 1
-            time.sleep(config.CAPTURE_INTERVAL_MS / 1000.0)
-
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-    finally:
-        capture.close()
-        print("Cleanup complete.")
+def main():
+    """Main entry point."""
+    app = PokerHUDApp()
+    app.run()
 
 
 if __name__ == "__main__":
