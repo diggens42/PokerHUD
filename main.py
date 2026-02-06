@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QInputDialog
 
 from pokerlens.core.ocr_engine import OCREngine
 from pokerlens.core.screen_capture import ScreenCapture
@@ -175,6 +175,7 @@ class PokerHUDApp:
         
         hud_window = HUDWindow(table.x, table.y, table.width, table.height, opacity=opacity)
         hud_window.set_font_size(font_size)
+        hud_window.note_requested.connect(self._add_player_note)
         hud_window.show()
         
         self.tracked_tables[hwnd] = {
@@ -220,6 +221,26 @@ class PokerHUDApp:
         if match:
             return match.group(0)
         return "Unknown"
+
+    def _add_player_note(self, player_name: str):
+        """Add note for player."""
+        from PyQt6.QtWidgets import QInputDialog
+        
+        player = self.database.get_player_by_username(player_name)
+        if not player:
+            return
+        
+        current_note = player.get("notes", "")
+        note, ok = QInputDialog.getMultiLineText(
+            None,
+            "Player Note",
+            f"Note for {player_name}:",
+            current_note
+        )
+        
+        if ok:
+            self.database.update_player_notes(player["id"], note)
+            self.logger.info("Note added", player=player_name)
 
     def _update_table(self, table, capture_count: int):
         """Update table state and HUD."""
@@ -268,7 +289,7 @@ class PokerHUDApp:
                             stats.three_bet_pct,
                             stats.fold_to_cbet_pct,
                         )
-                        stat_displays.append((pos.x, pos.y, stat_text))
+                        stat_displays.append((pos.x, pos.y, stat_text, seat_info.player_name))
             
             if hwnd in self.hud_windows:
                 self.hud_windows[hwnd].set_stats_display(stat_displays)
