@@ -1,0 +1,70 @@
+MIT License
+
+Copyright (c) 2024 Frederic Marcel Wahl
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## Additional Terms and Disclaimers
+
+### Educational Purpose
+This software is provided for educational and research purposes only. Users are
+solely responsible for ensuring their use complies with all applicable laws,
+regulations, and terms of service of poker platforms.
+
+### No Affiliation
+PokerHUD is not affiliated with, endorsed by, or connected to PokerStars,
+Flutter Entertainment, or any other poker platform or company.
+
+### Use at Own Risk
+The developers of PokerHUD assume no liability for:
+- Account suspensions or bans from poker platforms
+- Financial losses incurred while using this software
+- Violations of terms of service
+- Legal consequences of software usage
+- Data loss or corruption
+
+### Passive Monitoring
+PokerHUD operates by reading visible screen pixels only (OCR). It does not:
+- Read memory from poker client processes
+- Intercept network packets
+- Modify poker client files
+- Inject code into poker applications
+- Provide real-time advice or automated decisions
+
+Users must verify that passive screen-reading tools are permitted by their
+poker platform's terms of service in their jurisdiction.
+
+### Third-Party Components
+This software uses various open-source libraries, each with their own licenses:
+- Tesseract OCR (Apache License 2.0)
+- PyQt6 (GPL v3 / Commercial License)
+- OpenCV (Apache License 2.0)
+- And others - see requirements.txt
+
+### Data Privacy
+PokerHUD stores player statistics locally on your computer. No data is transmitted
+to external servers. Users are responsible for the security and backup of their
+local database files.
+
+### Warranty Disclaimer
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DAMAGES ARISING FROM
+THE USE OF THIS SOFTWARE.
