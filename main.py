@@ -25,7 +25,7 @@ import config
 
 
 class PokerHUDApp:
-    """Main application controller."""
+    """Main application controller with multi-table support."""
 
     def __init__(self):
         """Initialize application."""
@@ -41,9 +41,10 @@ class PokerHUDApp:
         self.hud_windows: dict[int, HUDWindow] = {}
         
         self.app = QApplication(sys.argv)
+        self.max_tables = 10
 
     def run(self):
-        """Main application loop."""
+        """Main application loop with multi-table support."""
         self.logger.info("PokerHUD starting", interval=config.CAPTURE_INTERVAL_MS)
 
         if config.DEBUG_SAVE_CAPTURES:
@@ -54,6 +55,14 @@ class PokerHUDApp:
         try:
             while True:
                 tables = self.detector.find_tables()
+                
+                if len(tables) > self.max_tables:
+                    self.logger.warning(
+                        "Too many tables detected",
+                        count=len(tables),
+                        max=self.max_tables
+                    )
+                    tables = tables[:self.max_tables]
                 
                 current_hwnds = {table.hwnd for table in tables}
                 previous_hwnds = set(self.tracked_tables.keys())
@@ -83,19 +92,26 @@ class PokerHUDApp:
             self._cleanup()
 
     def _handle_new_table(self, tables: list, hwnd: int):
-        """Handle new table detection."""
+        """Handle new table detection with dedicated HUD."""
         table = next(t for t in tables if t.hwnd == hwnd)
-        self.logger.info("New table detected", table=table.title)
+        self.logger.info(
+            "New table detected",
+            table=table.title,
+            position=f"{table.x},{table.y}",
+            size=f"{table.width}x{table.height}"
+        )
+        
+        table_size = self._detect_table_size(table.title)
         
         session_id = self.session_manager.start_session(
             table.title,
-            stakes="Unknown",
-            table_size=6
+            stakes=self._parse_stakes(table.title),
+            table_size=table_size.value
         )
         
-        parser = TableStateParser(self.ocr, TableSize.SIX_MAX)
+        parser = TableStateParser(self.ocr, table_size)
         tracker = HandTracker()
-        position_tracker = PositionTracker(TableSize.SIX_MAX)
+        position_tracker = PositionTracker(table_size)
         stat_widget = StatWidget()
         
         hud_window = HUDWindow(table.x, table.y, table.width, table.height)
@@ -108,11 +124,14 @@ class PokerHUDApp:
             "tracker": tracker,
             "position_tracker": position_tracker,
             "stat_widget": stat_widget,
+            "table_size": table_size,
         }
         self.hud_windows[hwnd] = hud_window
+        
+        self.logger.info("HUD created for table", hwnd=hwnd, active_tables=len(self.tracked_tables))
 
     def _handle_closed_table(self, hwnd: int):
-        """Handle table closure."""
+        """Handle table closure and cleanup."""
         table_info = self.tracked_tables[hwnd]
         self.logger.info("Table closed", table=table_info["table"].title)
         
@@ -123,6 +142,24 @@ class PokerHUDApp:
             del self.hud_windows[hwnd]
         
         del self.tracked_tables[hwnd]
+        
+        self.logger.info("HUD removed", active_tables=len(self.tracked_tables))
+
+    def _detect_table_size(self, title: str) -> TableSize:
+        """Detect table size from title."""
+        if "6-max" in title.lower() or "6 max" in title.lower():
+            return TableSize.SIX_MAX
+        elif "9-max" in title.lower() or "9 max" in title.lower():
+            return TableSize.NINE_MAX
+        return TableSize.SIX_MAX
+
+    def _parse_stakes(self, title: str) -> str:
+        """Parse stakes from table title."""
+        import re
+        match = re.search(r"\$[\d.]+/\$[\d.]+", title)
+        if match:
+            return match.group(0)
+        return "Unknown"
 
     def _update_table(self, table, capture_count: int):
         """Update table state and HUD."""
