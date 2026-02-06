@@ -16,6 +16,7 @@ from pokerlens.overlay.hud_window import HUDWindow
 from pokerlens.overlay.position_tracker import PositionTracker
 from pokerlens.overlay.stat_widget import StatWidget
 from pokerlens.overlay.system_tray import SystemTray
+from pokerlens.overlay.settings import Settings, SettingsDialog
 from pokerlens.parser.table_state import TableStateParser
 from pokerlens.parser.hand_tracker import HandTracker
 from pokerlens.storage.database import Database
@@ -31,9 +32,13 @@ class PokerHUDApp:
     def __init__(self):
         """Initialize application."""
         self.logger = get_logger()
+        
+        self.settings = Settings()
+        self.settings.apply_to_config()
+        
         self.detector = TableDetector()
         self.capture = ScreenCapture()
-        self.ocr = OCREngine()
+        self.ocr = OCREngine(self.settings.get("tesseract_path"))
         self.database = Database()
         self.session_manager = SessionManager(self.database)
         self.stats_calculator = StatsCalculator(self.database)
@@ -42,11 +47,22 @@ class PokerHUDApp:
         self.hud_windows: dict[int, HUDWindow] = {}
         
         self.app = QApplication(sys.argv)
-        self.max_tables = 10
+        self.max_tables = self.settings.get("max_tables", 10)
         self.is_tracking = False
         
         self.system_tray = SystemTray()
         self.system_tray.start_tracking.connect(self._start_tracking)
+        self.system_tray.stop_tracking.connect(self._stop_tracking)
+        self.system_tray.open_settings.connect(self._open_settings)
+        self.system_tray.quit_app.connect(self._quit)
+        self.system_tray.show()
+
+    def _open_settings(self):
+        """Open settings dialog."""
+        dialog = SettingsDialog(self.settings)
+        if dialog.exec():
+            self.max_tables = self.settings.get("max_tables", 10)
+            self.logger.info("Settings updated")
         self.system_tray.show_message("PokerHUD", "Application started. Click 'Start Tracking' to begin.")
 
         if config.DEBUG_SAVE_CAPTURES:
@@ -154,8 +170,11 @@ class PokerHUDApp:
         position_tracker = PositionTracker(table_size)
         stat_widget = StatWidget()
         
-        hud_window = HUDWindow(table.x, table.y, table.width, table.height, opacity=0.80)
-        hud_window.set_font_size(10)
+        opacity = self.settings.get("hud_opacity", 0.80)
+        font_size = self.settings.get("font_size", 10)
+        
+        hud_window = HUDWindow(table.x, table.y, table.width, table.height, opacity=opacity)
+        hud_window.set_font_size(font_size)
         hud_window.show()
         
         self.tracked_tables[hwnd] = {
