@@ -266,6 +266,8 @@ class PokerHUDApp:
             
             snapshot = parser.parse_table(img, table.width, table.height)
             
+            self.error_handler.reset_error_count(str(hwnd), "ocr")
+            
             stat_displays = []
             seat_positions = position_tracker.calculate_seat_positions(
                 table.x, table.y, table.width, table.height
@@ -302,6 +304,10 @@ class PokerHUDApp:
                 self.capture.save_capture(img, filepath)
 
         except Exception as e:
+            if "tesseract" in str(e).lower():
+                self.error_handler.handle_ocr_failure(str(hwnd), e)
+            else:
+                self.error_handler.handle_capture_failure(str(hwnd), e)
             self.logger.error("Failed to update table", hwnd=hwnd, error=str(e))
 
     def _cleanup(self):
