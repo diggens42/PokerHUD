@@ -114,7 +114,8 @@ class PokerHUDApp:
         position_tracker = PositionTracker(table_size)
         stat_widget = StatWidget()
         
-        hud_window = HUDWindow(table.x, table.y, table.width, table.height)
+        hud_window = HUDWindow(table.x, table.y, table.width, table.height, opacity=0.80)
+        hud_window.set_font_size(10)
         hud_window.show()
         
         self.tracked_tables[hwnd] = {
