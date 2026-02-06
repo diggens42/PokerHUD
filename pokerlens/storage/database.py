@@ -352,3 +352,170 @@ class Database:
             
             cursor.execute(query, (player_id,))
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_player_stats_cache(self, player_id: int) -> Optional[dict]:
+        """
+        Get cached stats for player.
+
+        Args:
+            player_id: Player ID.
+
+        Returns:
+            Stats dict or None.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM player_stats_cache WHERE player_id = ?", (player_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def update_player_stats_cache(
+        self,
+        player_id: int,
+        total_hands: int = 0,
+        vpip_hands: int = 0,
+        pfr_hands: int = 0,
+        postflop_bets: int = 0,
+        postflop_raises: int = 0,
+        postflop_calls: int = 0,
+        three_bet_opportunities: int = 0,
+        three_bet_made: int = 0,
+        fold_to_cbet_opportunities: int = 0,
+        fold_to_cbet_made: int = 0,
+    ) -> None:
+        """
+        Update cached stats for player.
+
+        Args:
+            player_id: Player ID.
+            total_hands: Total hands count.
+            vpip_hands: VPIP hands count.
+            pfr_hands: PFR hands count.
+            postflop_bets: Postflop bet count.
+            postflop_raises: Postflop raise count.
+            postflop_calls: Postflop call count.
+            three_bet_opportunities: 3-bet opportunity count.
+            three_bet_made: 3-bet made count.
+            fold_to_cbet_opportunities: Fold to cbet opportunity count.
+            fold_to_cbet_made: Fold to cbet made count.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO player_stats_cache 
+                (player_id, total_hands, vpip_hands, pfr_hands, postflop_bets, postflop_raises, 
+                 postflop_calls, three_bet_opportunities, three_bet_made, 
+                 fold_to_cbet_opportunities, fold_to_cbet_made, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(player_id) DO UPDATE SET
+                    total_hands = total_hands + excluded.total_hands,
+                    vpip_hands = vpip_hands + excluded.vpip_hands,
+                    pfr_hands = pfr_hands + excluded.pfr_hands,
+                    postflop_bets = postflop_bets + excluded.postflop_bets,
+                    postflop_raises = postflop_raises + excluded.postflop_raises,
+                    postflop_calls = postflop_calls + excluded.postflop_calls,
+                    three_bet_opportunities = three_bet_opportunities + excluded.three_bet_opportunities,
+                    three_bet_made = three_bet_made + excluded.three_bet_made,
+                    fold_to_cbet_opportunities = fold_to_cbet_opportunities + excluded.fold_to_cbet_opportunities,
+                    fold_to_cbet_made = fold_to_cbet_made + excluded.fold_to_cbet_made,
+                    last_updated = CURRENT_TIMESTAMP
+                """,
+                (player_id, total_hands, vpip_hands, pfr_hands, postflop_bets, postflop_raises,
+                 postflop_calls, three_bet_opportunities, three_bet_made,
+                 fold_to_cbet_opportunities, fold_to_cbet_made)
+            )
+
+    def rebuild_stats_cache(self) -> None:
+        """Rebuild all cached stats from scratch."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("DELETE FROM player_stats_cache")
+            
+            cursor.execute("SELECT id FROM players")
+            player_ids = [row["id"] for row in cursor.fetchall()]
+            
+            for player_id in player_ids:
+                stats = self._calculate_raw_stats(player_id, cursor)
+                if stats["total_hands"] > 0:
+                    cursor.execute(
+                        """
+                        INSERT INTO player_stats_cache 
+                        (player_id, total_hands, vpip_hands, pfr_hands, postflop_bets, postflop_raises,
+                         postflop_calls, three_bet_opportunities, three_bet_made,
+                         fold_to_cbet_opportunities, fold_to_cbet_made)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (player_id, stats["total_hands"], stats["vpip_hands"], stats["pfr_hands"],
+                         stats["postflop_bets"], stats["postflop_raises"], stats["postflop_calls"],
+                         stats["three_bet_opportunities"], stats["three_bet_made"],
+                         stats["fold_to_cbet_opportunities"], stats["fold_to_cbet_made"])
+                    )
+
+    def _calculate_raw_stats(self, player_id: int, cursor) -> dict:
+        """Calculate raw stat counts from actions."""
+        cursor.execute(
+            "SELECT COUNT(DISTINCT hand_id) FROM hand_actions WHERE player_id = ?",
+            (player_id,)
+        )
+        total_hands = cursor.fetchone()[0]
+
+        cursor.execute(
+            """
+            SELECT COUNT(DISTINCT hand_id) FROM hand_actions
+            WHERE player_id = ? AND street = 'preflop' AND is_voluntary = 1
+            AND action IN ('call', 'bet', 'raise', 'all-in')
+            """,
+            (player_id,)
+        )
+        vpip_hands = cursor.fetchone()[0]
+
+        cursor.execute(
+            """
+            SELECT COUNT(DISTINCT hand_id) FROM hand_actions
+            WHERE player_id = ? AND street = 'preflop' AND action IN ('raise', 'all-in')
+            """,
+            (player_id,)
+        )
+        pfr_hands = cursor.fetchone()[0]
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM hand_actions
+            WHERE player_id = ? AND street IN ('flop', 'turn', 'river') AND action = 'bet'
+            """,
+            (player_id,)
+        )
+        postflop_bets = cursor.fetchone()[0]
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM hand_actions
+            WHERE player_id = ? AND street IN ('flop', 'turn', 'river') AND action = 'raise'
+            """,
+            (player_id,)
+        )
+        postflop_raises = cursor.fetchone()[0]
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM hand_actions
+            WHERE player_id = ? AND street IN ('flop', 'turn', 'river') AND action = 'call'
+            """,
+            (player_id,)
+        )
+        postflop_calls = cursor.fetchone()[0]
+
+        return {
+            "total_hands": total_hands,
+            "vpip_hands": vpip_hands,
+            "pfr_hands": pfr_hands,
+            "postflop_bets": postflop_bets,
+            "postflop_raises": postflop_raises,
+            "postflop_calls": postflop_calls,
+            "three_bet_opportunities": 0,
+            "three_bet_made": 0,
+            "fold_to_cbet_opportunities": 0,
+            "fold_to_cbet_made": 0,
+        }
