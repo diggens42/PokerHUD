@@ -159,11 +159,13 @@ class OCREngine:
             lambda img: preprocess_for_ocr(img, threshold=False),
             lambda img: apply_adaptive_threshold(resize_image(img, 2.5), invert=True),
             lambda img: apply_threshold(resize_image(img, 3.0), 150, invert=False),
+            lambda img: apply_adaptive_threshold(resize_image(img, 2.0), invert=False),
+            lambda img: resize_image(apply_threshold(img, 180), 2.5),
         ]
 
         best_result = OCRResult(text="", confidence=0.0)
 
-        for strategy in strategies:
+        for i, strategy in enumerate(strategies):
             try:
                 processed = strategy(image)
                 result = self.read_text(processed, preprocess=False)
@@ -178,3 +180,25 @@ class OCREngine:
                 continue
 
         return best_result
+
+    def is_valid_player_name(self, text: str) -> bool:
+        """
+        Check if text looks like a valid player name.
+
+        Args:
+            text: OCR text result.
+
+        Returns:
+            True if text appears to be a valid player name.
+        """
+        if not text or len(text) < 2:
+            return False
+
+        if len(text) > 20:
+            return False
+
+        invalid_chars = set("$€£.,0123456789")
+        if all(c in invalid_chars or c.isspace() for c in text):
+            return False
+
+        return True
