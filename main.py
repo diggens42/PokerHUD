@@ -79,6 +79,10 @@ class PokerHUDApp:
 
                 tables = self.detector.find_tables()
                 
+                if not tables and not self.tracked_tables:
+                    if capture_count % 40 == 0:
+                        self.logger.debug("No PokerStars tables detected")
+                
                 if len(tables) > self.max_tables:
                     self.logger.warning(
                         "Too many tables detected",
