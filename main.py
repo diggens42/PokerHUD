@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QInputDialog
+from PyQt6.QtWidgets import QDialog
 
 from pokerlens.core.ocr_engine import OCREngine
 from pokerlens.core.screen_capture import ScreenCapture
@@ -56,6 +57,21 @@ class PokerHUDApp:
         self.system_tray.open_settings.connect(self._open_settings)
         self.system_tray.quit_app.connect(self._quit)
         self.system_tray.show()
+        
+        if self.settings.get("show_welcome", True):
+            self._show_welcome_dialog()
+
+    def _show_welcome_dialog(self):
+        """Show welcome dialog on first run."""
+        dialog = WelcomeDialog()
+        dialog.exec()
+        
+        if not dialog.should_show_again():
+            self.settings.set("show_welcome", False)
+        
+        if dialog.result() == QDialog.DialogCode.Accepted:
+            if dialog.sender() == dialog.settings_button:
+                self._open_settings()
 
     def _open_settings(self):
         """Open settings dialog."""
